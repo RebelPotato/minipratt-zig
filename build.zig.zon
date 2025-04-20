@@ -1,0 +1,12 @@
+.{
+    .name = .pratt,
+    .fingerprint = 0xabe8d705f84c0a14,
+    .version = "0.0.0",
+    .minimum_zig_version = "0.14.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+    },
+}
