@@ -174,6 +174,10 @@ const ParserError = error{
     ExpectedOperator,
     UnexpectedEOF,
 };
+fn expr(str: []const u8, node_store: *NodeStore) !Node.ID {
+    var lexer = try Lexer.init(str);
+    return expr_bp(&lexer, node_store, 0);
+}
 fn expr_bp(lexer: *Lexer, node_store: *NodeStore, min_bp: u8) !Node.ID {
     var lhs = if (try lexer.next()) |t| switch (t) {
         .atom => |n| try node_store.add(Node{ .atom = n }),
@@ -222,10 +226,8 @@ test "tokenize" {
 test "trivial parse" {
     const gpa = std.heap.page_allocator;
 
-    var lexer = try Lexer.init("7");
     var node_store = NodeStore.init(gpa);
-
-    const id = try expr_bp(&lexer, &node_store, 0);
+    const id = try expr("7", &node_store);
     const got = try node_store.to_string(id, gpa);
     try std.testing.expectEqualStrings("7", got);
 }
@@ -233,10 +235,8 @@ test "trivial parse" {
 test "parse 1+2*3" {
     const gpa = std.heap.page_allocator;
 
-    var lexer = try Lexer.init("1 + 2 * 3");
     var node_store = NodeStore.init(gpa);
-
-    const id = try expr_bp(&lexer, &node_store, 0);
+    const id = try expr("1+2*3", &node_store);
     const got = try node_store.to_string(id, gpa);
     try std.testing.expectEqualStrings("(+ 1 (* 2 3))", got);
 }
@@ -244,10 +244,8 @@ test "parse 1+2*3" {
 test "parse a+b*c*d+e" {
     const gpa = std.heap.page_allocator;
 
-    var lexer = try Lexer.init("a+b*c*d+e");
     var node_store = NodeStore.init(gpa);
-
-    const id = try expr_bp(&lexer, &node_store, 0);
+    const id = try expr("a+b*c*d+e", &node_store);
     const got = try node_store.to_string(id, gpa);
     try std.testing.expectEqualStrings("(+ (+ a (* (* b c) d)) e)", got);
 }
