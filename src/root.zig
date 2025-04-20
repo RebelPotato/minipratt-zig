@@ -41,9 +41,9 @@ const Lexer = struct {
         self.pos += 1;
 
         switch (c) {
-            '0'...'9' => {
+            '0'...'9', 'a'...'z' => {
                 const t = self.current;
-                self.current = token_atom(c - '0');
+                self.current = token_atom(c);
                 return t;
             },
             '+', '-', '*', '/' => {
@@ -131,7 +131,7 @@ const BinOp = struct {
     right: Node.ID,
 };
 const Node = union(NodeType) {
-    atom: i32,
+    atom: u8,
     binop: BinOp,
     pub const ID = enum(u32) { _ };
 };
@@ -159,7 +159,7 @@ const NodeStore = struct {
     pub fn to_string(self: *NodeStore, id: Node.ID, gpa: std.mem.Allocator) ![]const u8 {
         const node = self.nodes.items[@intFromEnum(id)];
         switch (node) {
-            .atom => |n| return std.fmt.allocPrint(gpa, "{d}", .{n}),
+            .atom => |n| return std.fmt.allocPrint(gpa, "{c}", .{n}),
             .binop => |b| {
                 const left_str = try self.to_string(b.left, gpa);
                 const right_str = try self.to_string(b.right, gpa);
@@ -201,11 +201,11 @@ test "tokenize" {
     var lexer = try Lexer.init("3 + 5 - 2");
 
     const expected = [_]?Token{
-        token_atom(3),
+        token_atom('3'),
         token_op('+'),
-        token_atom(5),
+        token_atom('5'),
         token_op('-'),
-        token_atom(2),
+        token_atom('2'),
         null,
     };
     const got = [_]?Token{
@@ -241,13 +241,13 @@ test "parse 1+2*3" {
     try std.testing.expectEqualStrings("(+ 1 (* 2 3))", got);
 }
 
-test "parse 1+2*3*4+5" {
+test "parse a+b*c*d+e" {
     const gpa = std.heap.page_allocator;
 
-    var lexer = try Lexer.init("1+2*3*4+5");
+    var lexer = try Lexer.init("a+b*c*d+e");
     var node_store = NodeStore.init(gpa);
 
     const id = try expr_bp(&lexer, &node_store, 0);
     const got = try node_store.to_string(id, gpa);
-    try std.testing.expectEqualStrings("(+ (+ 1 (* (* 2 3) 4)) 5)", got);
+    try std.testing.expectEqualStrings("(+ (+ a (* (* b c) d)) e)", got);
 }
