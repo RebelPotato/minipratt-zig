@@ -3,35 +3,16 @@ const testing = std.testing;
 const assert = std.debug.assert;
 const ArrayList = std.ArrayList;
 
-const TokenType = enum { number, operator };
-const TokenNumber = struct {
-    value: i32,
-};
-const TokenOperator = enum(u8) {
-    _,
-    pub fn to_binop(self: TokenOperator) ?BinOpType {
-        return switch (@intFromEnum(self)) {
-            '+' => BinOpType.add,
-            '-' => BinOpType.sub,
-            '*' => BinOpType.mul,
-            '/' => BinOpType.div,
-            else => null,
-        };
-    }
-};
+const TokenType = enum { atom, operator };
 const Token = union(TokenType) {
-    number: TokenNumber,
-    operator: TokenOperator,
+    atom: u8,
+    operator: u8,
 };
-fn token_num(value: i32) Token {
-    return Token{
-        .number = TokenNumber{ .value = value },
-    };
+fn token_atom(value: u8) Token {
+    return Token{ .atom = value };
 }
 fn token_op(op: u8) Token {
-    return Token{
-        .operator = @enumFromInt(op),
-    };
+    return Token{ .operator = op };
 }
 
 const LexerError = error{
@@ -62,14 +43,7 @@ const Lexer = struct {
         switch (c) {
             '0'...'9' => {
                 const t = self.current;
-                if (t) |tok| switch (tok) {
-                    .number => |n| {
-                        self.current = token_num(n.value * 10 + c - '0');
-                        return null;
-                    },
-                    else => {},
-                };
-                self.current = token_num(c - '0');
+                self.current = token_atom(c - '0');
                 return t;
             },
             '+', '-', '*', '/' => {
@@ -77,12 +51,8 @@ const Lexer = struct {
                 self.current = token_op(c);
                 return t;
             },
-            ' ' => {
-                return null;
-            },
-            else => {
-                return LexerError.InvalidToken;
-            },
+            ' ' => return null,
+            else => return LexerError.InvalidToken,
         }
     }
 
@@ -111,7 +81,7 @@ const Lexer = struct {
     }
 };
 
-const NodeType = enum { number, binop };
+const NodeType = enum { atom, binop };
 const Assoc = enum { left, right };
 const BinOpType = enum {
     add,
@@ -146,30 +116,34 @@ const BinOpType = enum {
         };
     }
 };
+pub fn to_binop_type(self: u8) ?BinOpType {
+    return switch (self) {
+        '+' => BinOpType.add,
+        '-' => BinOpType.sub,
+        '*' => BinOpType.mul,
+        '/' => BinOpType.div,
+        else => null,
+    };
+}
 const BinOp = struct {
     op: BinOpType,
     left: Node.ID,
     right: Node.ID,
 };
 const Node = union(NodeType) {
-    number: i32,
+    atom: i32,
     binop: BinOp,
     pub const ID = enum(u32) { _ };
-    pub fn num(value: i32) Node {
-        return Node{
-            .number = value,
-        };
-    }
-    pub fn bin_op(op: BinOpType, left: ID, right: ID) Node {
-        return Node{
-            .binop = BinOp{
-                .op = op,
-                .left = left,
-                .right = right,
-            },
-        };
-    }
 };
+pub fn node_binop(op: BinOpType, left: Node.ID, right: Node.ID) Node {
+    return Node{
+        .binop = BinOp{
+            .op = op,
+            .left = left,
+            .right = right,
+        },
+    };
+}
 const NodeStore = struct {
     nodes: ArrayList(Node),
     pub fn init(gpa: std.mem.Allocator) NodeStore {
@@ -185,7 +159,7 @@ const NodeStore = struct {
     pub fn to_string(self: *NodeStore, id: Node.ID, gpa: std.mem.Allocator) ![]const u8 {
         const node = self.nodes.items[@intFromEnum(id)];
         switch (node) {
-            .number => |n| return std.fmt.allocPrint(gpa, "{d}", .{n}),
+            .atom => |n| return std.fmt.allocPrint(gpa, "{d}", .{n}),
             .binop => |b| {
                 const left_str = try self.to_string(b.left, gpa);
                 const right_str = try self.to_string(b.right, gpa);
@@ -196,42 +170,42 @@ const NodeStore = struct {
 };
 
 const ParserError = error{
-    ExpectedNumber,
+    ExpectedAtom,
     ExpectedOperator,
     UnexpectedEOF,
 };
 fn expr_bp(lexer: *Lexer, node_store: *NodeStore, min_bp: u8) !Node.ID {
     var lhs = if (try lexer.next()) |t| switch (t) {
-        .number => |n| try node_store.add(Node.num(n.value)),
-        else => return ParserError.ExpectedNumber,
+        .atom => |n| try node_store.add(Node{ .atom = n }),
+        else => return ParserError.ExpectedAtom,
     } else return ParserError.UnexpectedEOF;
 
     loop: while (true) {
-        const op: ?BinOpType = if (try lexer.peek()) |t| switch (t) {
-            .operator => |op| op.to_binop(),
+        const op_or: ?BinOpType = if (try lexer.peek()) |t| switch (t) {
+            .operator => |op| to_binop_type(op),
             else => null,
         } else break :loop;
-        if (op) |binop| {
-            const lbp, const rbp = binop.binding_power();
+        if (op_or) |op| {
+            const lbp, const rbp = op.binding_power();
             if (lbp < min_bp) break :loop;
 
             _ = try lexer.next(); // consume the operator
             const rhs = try expr_bp(lexer, node_store, rbp);
-            lhs = try node_store.add(Node.bin_op(binop, lhs, rhs));
+            lhs = try node_store.add(node_binop(op, lhs, rhs));
         } else return ParserError.ExpectedOperator;
     }
     return lhs;
 }
 
 test "tokenize" {
-    var lexer = try Lexer.init("32 + 54 - 21");
+    var lexer = try Lexer.init("3 + 5 - 2");
 
     const expected = [_]?Token{
-        token_num(32),
+        token_atom(3),
         token_op('+'),
-        token_num(54),
+        token_atom(5),
         token_op('-'),
-        token_num(21),
+        token_atom(2),
         null,
     };
     const got = [_]?Token{
@@ -248,12 +222,12 @@ test "tokenize" {
 test "trivial parse" {
     const gpa = std.heap.page_allocator;
 
-    var lexer = try Lexer.init("32");
+    var lexer = try Lexer.init("7");
     var node_store = NodeStore.init(gpa);
 
     const id = try expr_bp(&lexer, &node_store, 0);
     const got = try node_store.to_string(id, gpa);
-    try std.testing.expectEqualStrings("32", got);
+    try std.testing.expectEqualStrings("7", got);
 }
 
 test "parse 1+2*3" {
